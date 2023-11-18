@@ -76,6 +76,7 @@ dracut --force --uefi \
     --uefi-stub $uefistub \
     --uefi-splash-image $splash \
     --kernel-image $kernel \
+    --kver $kernel_hooks_version \
     $unsiguki
 
 # check if sbctl was initialized
@@ -84,6 +85,7 @@ dracut --force --uefi \
 
 # sign the UKI or not
 if [[ "$sign" == "yes" ]]; then 
+    mkdir -p $output_dir
     sbctl sign $unsiguki -o $output
 else
     cp -a $unsiguki $output
