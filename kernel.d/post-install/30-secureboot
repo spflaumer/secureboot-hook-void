@@ -1,0 +1,103 @@
+#!/usr/bin/bash
+
+# kernel hook to automate the creation of a secureboot signed UKI for Void Linux
+# depends on:
+# - dracut
+# - sbctl
+# - binutils
+
+# Simon Peter "spflaumer" Pflaumer - 2023
+# This script is subject to the GNU GPLv3 (see note at the end of this script)
+
+set -euo pipefail
+
+# print an error message to the screen and exit
+err() {
+    printf "secureboot-hook-void: \e[31m%s\n\e[0m" "$2" >&2
+    exit $1
+}
+
+# get the name of the distribution
+. /etc/os-release
+[[ "$NAME" == "Void" ]] || err 1 "expected os: 'Void', have '$NAME'"
+
+# set defaults
+output_dir="/boot/efi/$NAME"
+output_name="linux-{version}.efi"
+# if cmdline is empty and cmdline_dracut="config" or "gen"
+# let dracut handle the cmdline from configuration or using --print-cmdline respectively
+cmdline=
+cmdline_dracut="no"
+sign="yes"
+uefistub="/usr/lib/gummiboot/linux{march}.efi.stub"
+splash="/dev/null"
+backup_old="yes"
+
+# load user configuration
+. /etc/kernel.d/secureboot.conf
+
+kernel="$(find / -type f -name vmlinuz\*$kernel_hooks_version)"
+[[ "$kernel" ]] || err 1 "no kernel found? is this script not ran by xbps?"
+
+tempdir="$(mktemp)"
+unsiguki="$tempdir/unsig.efi"
+
+output_name="$(echo $output_name | sed 's|{version}|$kernel_hooks_version|')"
+output="$output_dir/$output_name"
+
+case "$(uname -m)" in
+	aarch64) MARCH="aa64";;
+	arm*)    MARCH="arm";;
+	riscv64) MARCH="riscv64";;
+	x86)     MARCH="ia32";;
+	x86_64)  MARCH="x64";;
+esac
+uefistub="$(echo $uefistub | sed 's|{march}|$MARCH|')"
+
+if [[ -z "$cmdline" ]] && [[ $cmdline_dracut != "no" ]]; then
+    [[ "$cmdline_dracut" == "gen" ]] && cmdline="--kernel-cmdline $(dracut --print-cmdline)"
+else
+    err 1 "no cmdline is set! are 'cmdline' and 'cmdline_dracut' set correctly?"
+fi
+
+# backup the old UKI image
+[[ -f "$output" ]] && [[ "$backup_old" == "yes" ]] && cp -a $output $output.old
+
+# generate the unsigned UKI
+dracut --force --uefi \
+    $cmdline \
+    --hostonly --hostonly-cmdline \
+    --early-microcode --uefi \
+    --uefi-stub $uefistub \
+    --uefi-splash-image $splash \
+    --kernel-image $kernel \
+    $unsiguki
+
+# check if sbctl was initialized
+#TODO generate the keys within this script
+[[ "$(sbctl status | grep Installed | sed -E 's|Installed.*sbctl is (.*)installed|\1|')" ]] || err 1 "please initialize and enroll secureboot keys with sbctl first!"
+
+# sign the UKI or not
+if [[ "$sign" == "yes"]]; then 
+    sbctl $unsiguki -o $output
+else
+    cp -a $unsiguki $output
+fi
+
+echo "You may need to update your boot entries with efibootmgr in order for your system to boot!"
+
+#   secureboot-hook-void
+#   Copyright (C) 2023  Simon Peter "spflaumer" Pflaumer
+
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   (at your option) any later version.
+
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <https://www.gnu.org/licenses/>.
