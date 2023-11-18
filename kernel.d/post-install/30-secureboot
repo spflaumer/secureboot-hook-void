@@ -27,6 +27,7 @@ output_name="linux-{version}.efi"
 # if cmdline is empty and cmdline_dracut="config" or "gen"
 # let dracut handle the cmdline from configuration or using --print-cmdline respectively
 cmdline=
+kernel_cmdline=  # this isn't actually set by the config file
 cmdline_dracut="no"
 sign="yes"
 uefistub="/usr/lib/gummiboot/linux{march}.efi.stub"
@@ -39,10 +40,10 @@ backup_old="yes"
 kernel="$(find / -type f -name vmlinuz\*$kernel_hooks_version)"
 [[ "$kernel" ]] || err 1 "no kernel found? is this script not ran by xbps?"
 
-tempdir="$(mktemp)"
+tempdir="$(mktemp -d)"
 unsiguki="$tempdir/unsig.efi"
 
-output_name="$(echo $output_name | sed 's|{version}|$kernel_hooks_version|')"
+output_name="$(echo $output_name | sed "s|{version}|$kernel_hooks_version|")"
 output="$output_dir/$output_name"
 
 case "$(uname -m)" in
@@ -52,10 +53,13 @@ case "$(uname -m)" in
 	x86)     MARCH="ia32";;
 	x86_64)  MARCH="x64";;
 esac
-uefistub="$(echo $uefistub | sed 's|{march}|$MARCH|')"
+uefistub="$(echo $uefistub | sed "s|{march}|${MARCH}|")"
 
 if [[ -z "$cmdline" ]] && [[ $cmdline_dracut != "no" ]]; then
-    [[ "$cmdline_dracut" == "gen" ]] && cmdline="--kernel-cmdline $(dracut --print-cmdline)"
+    if [[ "$cmdline_dracut" == "gen" ]]; then
+        cmdline="$(dracut --print-cmdline)"
+        kernel_cmdline="--kernel-cmdline"
+    fi
 else
     err 1 "no cmdline is set! are 'cmdline' and 'cmdline_dracut' set correctly?"
 fi
@@ -65,7 +69,7 @@ fi
 
 # generate the unsigned UKI
 dracut --force --uefi \
-    $cmdline \
+    $kernel_cmdline "$cmdline" \
     --hostonly --hostonly-cmdline \
     --early-microcode --uefi \
     --uefi-stub $uefistub \
@@ -75,11 +79,11 @@ dracut --force --uefi \
 
 # check if sbctl was initialized
 #TODO generate the keys within this script
-[[ "$(sbctl status | grep Installed | sed -E 's|Installed.*sbctl is (.*)installed|\1|')" ]] || err 1 "please initialize and enroll secureboot keys with sbctl first!"
+[[ -z "$(sbctl status | grep Installed | sed -E 's|Installed.*sbctl is (.*)installed|\1|')" ]] || err 1 "please initialize and enroll secureboot keys with sbctl first!"
 
 # sign the UKI or not
 if [[ "$sign" == "yes"]]; then 
-    sbctl $unsiguki -o $output
+    sbctl sign $unsiguki -o $output
 else
     cp -a $unsiguki $output
 fi
