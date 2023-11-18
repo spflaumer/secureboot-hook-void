@@ -58,6 +58,7 @@ uefistub="$(echo $uefistub | sed "s|{march}|${MARCH}|")"
 if [[ -z "$cmdline" ]] && [[ $cmdline_dracut != "no" ]]; then
     if [[ "$cmdline_dracut" == "gen" ]]; then
         cmdline="$(dracut --print-cmdline)"
+	cmdline+=" quiet splash"
         kernel_cmdline="--kernel-cmdline"
     fi
 else
@@ -82,7 +83,7 @@ dracut --force --uefi \
 [[ -z "$(sbctl status | grep Installed | sed -E 's|Installed.*sbctl is (.*)installed|\1|')" ]] || err 1 "please initialize and enroll secureboot keys with sbctl first!"
 
 # sign the UKI or not
-if [[ "$sign" == "yes"]]; then 
+if [[ "$sign" == "yes" ]]; then 
     sbctl sign $unsiguki -o $output
 else
     cp -a $unsiguki $output
